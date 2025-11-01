@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
@@ -31,7 +32,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +45,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -59,19 +60,51 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 
-data class FollowerUi(val name: String, val avatarRes: Int, val isFollowed: Boolean = false)
+data class FollowerUi(val id: Long, val name: String, val avatarRes: Int, val isFollowed: Boolean = false)
+
+class ProfileViewModel : ViewModel() {
+    var name by mutableStateOf("Daulet T")
+    var bio by mutableStateOf("Android learner · Compose enjoyer")
+    val followers = mutableStateListOf(
+        FollowerUi(1, "Aruzhan K.", R.drawable.photo_profile, true),
+        FollowerUi(2, "Timur S.", R.drawable.photo_profile, false),
+        FollowerUi(3, "Dana A.", R.drawable.photo_profile, false),
+        FollowerUi(4, "Maks T.", R.drawable.photo_profile, true),
+        FollowerUi(5, "Kamila Z.", R.drawable.photo_profile, false)
+    )
+    fun followersCount(): Int = followers.size
+    fun followingCount(): Int = followers.count { it.isFollowed }
+    fun toggleFollow(id: Long) {
+        val i = followers.indexOfFirst { it.id == id }
+        if (i >= 0) {
+            val f = followers[i]
+            followers[i] = f.copy(isFollowed = !f.isFollowed)
+        }
+    }
+    fun removeFollower(id: Long): Pair<Int, FollowerUi?> {
+        val i = followers.indexOfFirst { it.id == id }
+        return if (i >= 0) i to followers.removeAt(i) else -1 to null
+    }
+    fun addFollowerAt(index: Int, f: FollowerUi) {
+        val pos = index.coerceIn(0, followers.size)
+        followers.add(pos, f)
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,17 +116,40 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun App() {
     val nav = rememberNavController()
+    val vm: ProfileViewModel = viewModel()
     MaterialTheme {
-        NavHost(navController = nav, startDestination = "profile") {
-            composable("profile") { ProfileScaffold(onFollowersClick = { nav.navigate("followers") }) }
-            composable("followers") { FollowersScreen(onBack = { nav.popBackStack() }) }
+        NavHost(navController = nav, startDestination = "home") {
+            composable("home") { HomeScreen(onGoProfile = { nav.navigate("profile") }) }
+            composable("profile") {
+                ProfileScaffold(
+                    vm = vm,
+                    onFollowersClick = { nav.navigate("followers") },
+                    onEditClick = { nav.navigate("edit") }
+                )
+            }
+            composable("edit") { EditProfileScreen(vm = vm, onBack = { nav.popBackStack() }) }
+            composable("followers") { FollowersScreen(vm = vm, onBack = { nav.popBackStack() }) }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScaffold(onFollowersClick: () -> Unit) {
+fun HomeScreen(onGoProfile: () -> Unit) {
+    Scaffold(topBar = { CenterAlignedTopAppBar(title = { Text("Home") }) }) { p ->
+        Column(
+            modifier = Modifier.padding(p).fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Button(onClick = onGoProfile, shape = RoundedCornerShape(14.dp)) { Text("Open Profile") }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProfileScaffold(vm: ProfileViewModel, onFollowersClick: () -> Unit, onEditClick: () -> Unit) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -110,13 +166,15 @@ fun ProfileScaffold(onFollowersClick: () -> Unit) {
             }
         }
     }
-
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Profile", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                actions = { IconButton(onClick = {}) { Icon(Icons.Default.MoreVert, null) } },
+                actions = {
+                    IconButton(onClick = onEditClick) { Icon(Icons.Default.Edit, null) }
+                    IconButton(onClick = {}) { Icon(Icons.Default.MoreVert, null) }
+                },
                 scrollBehavior = scrollBehavior
             )
         },
@@ -124,6 +182,7 @@ fun ProfileScaffold(onFollowersClick: () -> Unit) {
     ) { innerPadding ->
         ProfileScreen(
             modifier = Modifier.padding(innerPadding).fillMaxSize(),
+            vm = vm,
             onShowSnackbar = showSnackbar,
             onFollowersClick = onFollowersClick
         )
@@ -133,33 +192,26 @@ fun ProfileScaffold(onFollowersClick: () -> Unit) {
 @Composable
 fun ProfileScreen(
     modifier: Modifier = Modifier,
+    vm: ProfileViewModel,
     onShowSnackbar: (String, String?, (() -> Unit)?) -> Unit,
     onFollowersClick: () -> Unit
 ) {
     var isFollowing by rememberSaveable { mutableStateOf(false) }
-    var followers by rememberSaveable { mutableStateOf(128) }
-    var following by rememberSaveable { mutableStateOf(87) }
     var showUnfollowDialog by rememberSaveable { mutableStateOf(false) }
-
     val followColor by animateColorAsState(
         targetValue = if (isFollowing) Color(0xFF1B5E20) else Color(0xFF6C63FF),
         animationSpec = tween(320, easing = FastOutSlowInEasing),
         label = "followColor"
     )
     val cardShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
-
-    Box(
-        modifier = modifier.background(Brush.verticalGradient(listOf(Color(0xFF0F1020), Color(0xFF171A33))))
-    ) {
+    Box(modifier = modifier.background(Brush.verticalGradient(listOf(Color(0xFF0F1020), Color(0xFF171A33))))) {
         Box(
             modifier = Modifier.fillMaxWidth().height(220.dp)
                 .background(Brush.linearGradient(listOf(Color(0xFF6C63FF), Color(0xFF00BFA6))))
         )
-        Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-        ) {
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(120.dp))
-            ElevatedCard(
+            androidx.compose.material3.ElevatedCard(
                 modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth()
                     .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)), cardShape),
                 shape = cardShape,
@@ -171,12 +223,12 @@ fun ProfileScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Daulet T", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Text(vm.name, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                         Spacer(Modifier.width(6.dp))
                         Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF00E5A8), modifier = Modifier.size(18.dp))
                     }
                     Text(
-                        "Android learner · Compose enjoyer",
+                        vm.bio,
                         fontSize = 14.sp, color = Color(0xFFA6ABCF),
                         modifier = Modifier.padding(top = 4.dp), maxLines = 2, overflow = TextOverflow.Ellipsis
                     )
@@ -184,8 +236,8 @@ fun ProfileScreen(
                         modifier = Modifier.padding(top = 16.dp).fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        Box(Modifier.clickable { onFollowersClick() }) { StatChip("Followers", followers) }
-                        StatChip("Following", following)
+                        Box(Modifier.clickable { onFollowersClick() }) { StatChip("Followers", vm.followersCount()) }
+                        StatChip("Following", vm.followingCount())
                     }
                     Row(
                         modifier = Modifier.padding(top = 18.dp).fillMaxWidth(),
@@ -194,10 +246,8 @@ fun ProfileScreen(
                         Button(
                             onClick = {
                                 if (!isFollowing) {
-                                    followers++; isFollowing = true
-                                    onShowSnackbar("Followed", "UNDO") {
-                                        if (isFollowing && followers > 0) followers--; isFollowing = false
-                                    }
+                                    isFollowing = true
+                                    onShowSnackbar("Followed", "UNDO") { isFollowing = false }
                                 } else showUnfollowDialog = true
                             },
                             modifier = Modifier.weight(1f),
@@ -215,12 +265,11 @@ fun ProfileScreen(
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                             contentPadding = PaddingValues(0.dp)
-                        ) { Icon(Icons.Default.Notifications, contentDescription = "Notifications", tint = Color.White) }
+                        ) { Icon(Icons.Default.Notifications, contentDescription = "Notifications") }
                     }
-                    TextButton(
-                        onClick = { },
-                        modifier = Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally)
-                    ) { Text("Message", color = Color(0xFFA6ABCF)) }
+                    TextButton(onClick = { }, modifier = Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally)) {
+                        Text("Message", color = Color(0xFFA6ABCF))
+                    }
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -244,12 +293,9 @@ fun ProfileScreen(
                 title = { Text("Unfollow?") },
                 text = { Text("Are you sure you want to unfollow this user?") },
                 confirmButton = {
-                    TextButton(onClick = {
-                        if (isFollowing && followers > 0) followers--
-                        isFollowing = false
-                        showUnfollowDialog = false
-                        onShowSnackbar("Unfollowed", "UNDO") { isFollowing = true; followers++ }
-                    }) { Text("Unfollow", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { isFollowing = false; showUnfollowDialog = false; onShowSnackbar("Unfollowed", "UNDO") { isFollowing = true } }) {
+                        Text("Unfollow", color = MaterialTheme.colorScheme.error)
+                    }
                 },
                 dismissButton = { TextButton(onClick = { showUnfollowDialog = false }) { Text("Cancel") } }
             )
@@ -286,19 +332,9 @@ fun StoriesRow() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FollowersScreen(onBack: () -> Unit) {
-    val people = remember {
-        mutableStateListOf(
-            FollowerUi("Aruzhan K.", R.drawable.photo_profile, true),
-            FollowerUi("Timur S.", R.drawable.photo_profile, false),
-            FollowerUi("Dana A.", R.drawable.photo_profile, false),
-            FollowerUi("Maks T.", R.drawable.photo_profile, true),
-            FollowerUi("Kamila Z.", R.drawable.photo_profile, false)
-        )
-    }
+fun FollowersScreen(vm: ProfileViewModel, onBack: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -313,22 +349,16 @@ fun FollowersScreen(onBack: () -> Unit) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(people, key = { it.name }) { f ->
+            items(vm.followers, key = { it.id }) { f ->
                 FollowerItem(
                     follower = f,
-                    onToggleFollow = {
-                        val i = people.indexOf(f)
-                        if (i >= 0) people[i] = people[i].copy(isFollowed = !people[i].isFollowed)
-                    },
+                    onToggleFollow = { vm.toggleFollow(f.id) },
                     onRemove = {
-                        val idx = people.indexOf(f)
-                        if (idx >= 0) {
-                            val removed = people.removeAt(idx)
+                        val (idx, removed) = vm.removeFollower(f.id)
+                        if (removed != null) {
                             scope.launch {
                                 val res = snackbar.showSnackbar("Removed ${removed.name}", actionLabel = "UNDO")
-                                if (res == SnackbarResult.ActionPerformed) {
-                                    people.add(idx.coerceIn(0, people.size), removed)
-                                }
+                                if (res == SnackbarResult.ActionPerformed) vm.addFollowerAt(idx, removed)
                             }
                         }
                     }
@@ -344,7 +374,12 @@ fun FollowerItem(
     onToggleFollow: () -> Unit,
     onRemove: () -> Unit
 ) {
-    ElevatedCard(
+    val animatedColor by animateColorAsState(
+        if (follower.isFollowed) Color(0xFF00E5A8) else Color(0xFF6C63FF),
+        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        label = "btn"
+    )
+    androidx.compose.material3.ElevatedCard(
         colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF15193B)),
         shape = RoundedCornerShape(14.dp),
         elevation = CardDefaults.elevatedCardElevation(2.dp),
@@ -360,42 +395,54 @@ fun FollowerItem(
                 modifier = Modifier.size(44.dp).clip(CircleShape),
                 contentScale = ContentScale.Crop
             )
-            Column(
-                modifier = Modifier.padding(start = 12.dp).weight(1f)
-            ) {
-                Text(
-                    follower.name,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    "follows you",
-                    color = Color(0xFFA6ABCF),
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text(follower.name, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("follows you", color = Color(0xFFA6ABCF), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             TextButton(onClick = onRemove) { Text("Remove", color = Color(0xFFFF5252), maxLines = 1) }
             Spacer(Modifier.width(6.dp))
-            val followColor = if (follower.isFollowed) Color(0xFF00E5A8) else Color(0xFF6C63FF)
             Button(
                 onClick = onToggleFollow,
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = followColor),
+                colors = ButtonDefaults.buttonColors(containerColor = animatedColor),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 modifier = Modifier.widthIn(min = 96.dp).heightIn(min = 36.dp)
             ) {
-                Text(
-                    if (follower.isFollowed) "Following" else "Follow",
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                AnimatedContent(targetState = follower.isFollowed, label = "txt") {
+                    Text(if (it) "Following" else "Follow", color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditProfileScreen(vm: ProfileViewModel, onBack: () -> Unit) {
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Edit Profile") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) }
+    ) { p ->
+        Column(modifier = Modifier.padding(p).fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextField(value = vm.name, onValueChange = { vm.name = it }, singleLine = true, label = { Text("Name") })
+            TextField(value = vm.bio, onValueChange = { vm.bio = it }, label = { Text("Bio") })
+            Button(
+                onClick = {
+                    scope.launch {
+                        snackbar.showSnackbar("Profile updated", withDismissAction = true)
+                        onBack()
+                    }
+                },
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Save") }
         }
     }
 }
