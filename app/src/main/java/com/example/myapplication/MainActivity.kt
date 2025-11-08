@@ -27,18 +27,20 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -48,8 +50,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -68,42 +72,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.myapplication.ui.UserViewModel
 import kotlinx.coroutines.launch
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 
 data class FollowerUi(val id: Long, val name: String, val avatarRes: Int, val isFollowed: Boolean = false)
 
 class ProfileViewModel : ViewModel() {
     var name by mutableStateOf("Daulet T")
     var bio by mutableStateOf("Android learner · Compose enjoyer")
-    val followers = mutableStateListOf(
-        FollowerUi(1, "Aruzhan K.", R.drawable.photo_profile, true),
-        FollowerUi(2, "Timur S.", R.drawable.photo_profile, false),
-        FollowerUi(3, "Dana A.", R.drawable.photo_profile, false),
-        FollowerUi(4, "Maks T.", R.drawable.photo_profile, true),
-        FollowerUi(5, "Kamila Z.", R.drawable.photo_profile, false)
-    )
-    fun followersCount(): Int = followers.size
-    fun followingCount(): Int = followers.count { it.isFollowed }
-    fun toggleFollow(id: Long) {
-        val i = followers.indexOfFirst { it.id == id }
-        if (i >= 0) {
-            val f = followers[i]
-            followers[i] = f.copy(isFollowed = !f.isFollowed)
-        }
-    }
-    fun removeFollower(id: Long): Pair<Int, FollowerUi?> {
-        val i = followers.indexOfFirst { it.id == id }
-        return if (i >= 0) i to followers.removeAt(i) else -1 to null
-    }
-    fun addFollowerAt(index: Int, f: FollowerUi) {
-        val pos = index.coerceIn(0, followers.size)
-        followers.add(pos, f)
-    }
+    fun followingCount(): Int = 0
 }
 
 class MainActivity : ComponentActivity() {
@@ -116,19 +96,24 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun App() {
     val nav = rememberNavController()
-    val vm: ProfileViewModel = viewModel()
+    val profileVm: ProfileViewModel = viewModel()
+    val userVm: UserViewModel = viewModel()
     MaterialTheme {
         NavHost(navController = nav, startDestination = "home") {
             composable("home") { HomeScreen(onGoProfile = { nav.navigate("profile") }) }
             composable("profile") {
                 ProfileScaffold(
-                    vm = vm,
-                    onFollowersClick = { nav.navigate("followers") },
+                    vm = profileVm,
+                    userVM = userVm,
+                    onFollowersClick = {
+                        userVm.refresh()
+                        nav.navigate("followers")
+                    },
                     onEditClick = { nav.navigate("edit") }
                 )
             }
-            composable("edit") { EditProfileScreen(vm = vm, onBack = { nav.popBackStack() }) }
-            composable("followers") { FollowersScreen(vm = vm, onBack = { nav.popBackStack() }) }
+            composable("edit") { EditProfileScreen(vm = profileVm, onBack = { nav.popBackStack() }) }
+            composable("followers") { FollowersScreen(userVM = userVm, onBack = { nav.popBackStack() }) }
         }
     }
 }
@@ -149,7 +134,12 @@ fun HomeScreen(onGoProfile: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScaffold(vm: ProfileViewModel, onFollowersClick: () -> Unit, onEditClick: () -> Unit) {
+fun ProfileScaffold(
+    vm: ProfileViewModel,
+    userVM: UserViewModel,
+    onFollowersClick: () -> Unit,
+    onEditClick: () -> Unit
+) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -160,7 +150,7 @@ fun ProfileScaffold(vm: ProfileViewModel, onFollowersClick: () -> Unit, onEditCl
                     message = message,
                     actionLabel = action,
                     withDismissAction = true,
-                    duration = SnackbarDuration.Short
+                    duration = androidx.compose.material3.SnackbarDuration.Short
                 )
                 if (res == SnackbarResult.ActionPerformed) onAction?.invoke()
             }
@@ -183,6 +173,7 @@ fun ProfileScaffold(vm: ProfileViewModel, onFollowersClick: () -> Unit, onEditCl
         ProfileScreen(
             modifier = Modifier.padding(innerPadding).fillMaxSize(),
             vm = vm,
+            userVM = userVM,
             onShowSnackbar = showSnackbar,
             onFollowersClick = onFollowersClick
         )
@@ -193,9 +184,12 @@ fun ProfileScaffold(vm: ProfileViewModel, onFollowersClick: () -> Unit, onEditCl
 fun ProfileScreen(
     modifier: Modifier = Modifier,
     vm: ProfileViewModel,
+    userVM: UserViewModel,
     onShowSnackbar: (String, String?, (() -> Unit)?) -> Unit,
     onFollowersClick: () -> Unit
 ) {
+    val users by userVM.users.collectAsState()
+    val followersCount = users.size
     var isFollowing by rememberSaveable { mutableStateOf(false) }
     var showUnfollowDialog by rememberSaveable { mutableStateOf(false) }
     val followColor by animateColorAsState(
@@ -211,7 +205,7 @@ fun ProfileScreen(
         )
         Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(120.dp))
-            androidx.compose.material3.ElevatedCard(
+            ElevatedCard(
                 modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth()
                     .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)), cardShape),
                 shape = cardShape,
@@ -236,7 +230,7 @@ fun ProfileScreen(
                         modifier = Modifier.padding(top = 16.dp).fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        Box(Modifier.clickable { onFollowersClick() }) { StatChip("Followers", vm.followersCount()) }
+                        Box(Modifier.clickable { onFollowersClick() }) { StatChip("Followers", followersCount) }
                         StatChip("Following", vm.followingCount())
                     }
                     Row(
@@ -267,9 +261,6 @@ fun ProfileScreen(
                             contentPadding = PaddingValues(0.dp)
                         ) { Icon(Icons.Default.Notifications, contentDescription = "Notifications") }
                     }
-                    TextButton(onClick = { }, modifier = Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally)) {
-                        Text("Message", color = Color(0xFFA6ABCF))
-                    }
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -293,9 +284,11 @@ fun ProfileScreen(
                 title = { Text("Unfollow?") },
                 text = { Text("Are you sure you want to unfollow this user?") },
                 confirmButton = {
-                    TextButton(onClick = { isFollowing = false; showUnfollowDialog = false; onShowSnackbar("Unfollowed", "UNDO") { isFollowing = true } }) {
-                        Text("Unfollow", color = MaterialTheme.colorScheme.error)
-                    }
+                    TextButton(onClick = {
+                        isFollowing = false
+                        showUnfollowDialog = false
+                        onShowSnackbar("Unfollowed", "UNDO") { isFollowing = true }
+                    }) { Text("Unfollow", color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = { TextButton(onClick = { showUnfollowDialog = false }) { Text("Cancel") } }
             )
@@ -332,37 +325,58 @@ fun StoriesRow() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FollowersScreen(vm: ProfileViewModel, onBack: () -> Unit) {
+fun FollowersScreen(userVM: UserViewModel, onBack: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val users by userVM.users.collectAsState()
+    var loading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (users.isEmpty() && !loading) {
+            loading = true
+            try { userVM.refresh() } finally { loading = false }
+        }
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Followers") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            loading = true
+                            scope.launch {
+                                try { userVM.refresh() } finally { loading = false }
+                            }
+                        }
+                    ) { Icon(Icons.Default.Refresh, contentDescription = "Refresh") }
+                }
             )
         },
         snackbarHost = { SnackbarHost(snackbar) }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.padding(padding).fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(vm.followers, key = { it.id }) { f ->
-                FollowerItem(
-                    follower = f,
-                    onToggleFollow = { vm.toggleFollow(f.id) },
-                    onRemove = {
-                        val (idx, removed) = vm.removeFollower(f.id)
-                        if (removed != null) {
-                            scope.launch {
-                                val res = snackbar.showSnackbar("Removed ${removed.name}", actionLabel = "UNDO")
-                                if (res == SnackbarResult.ActionPerformed) vm.addFollowerAt(idx, removed)
-                            }
-                        }
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (users.isEmpty() && !loading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Пока пусто. Нажми Refresh.", color = Color(0xFFA6ABCF))
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(users, key = { it.id }) { u ->
+                        FollowerItem(
+                            follower = FollowerUi(u.id.toLong(), u.name, R.drawable.photo_profile),
+                            onToggleFollow = {},
+                            onRemove = {}
+                        )
                     }
-                )
+                }
             }
         }
     }
@@ -379,7 +393,7 @@ fun FollowerItem(
         animationSpec = tween(300, easing = FastOutSlowInEasing),
         label = "btn"
     )
-    androidx.compose.material3.ElevatedCard(
+    ElevatedCard(
         colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF15193B)),
         shape = RoundedCornerShape(14.dp),
         elevation = CardDefaults.elevatedCardElevation(2.dp),
@@ -409,40 +423,9 @@ fun FollowerItem(
                 modifier = Modifier.widthIn(min = 96.dp).heightIn(min = 36.dp)
             ) {
                 AnimatedContent(targetState = follower.isFollowed, label = "txt") {
-                    Text(if (it) "Following" else "Follow", color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(if (it) "Following" else "Follow", color = Color.White)
                 }
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EditProfileScreen(vm: ProfileViewModel, onBack: () -> Unit) {
-    val snackbar = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Edit Profile") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbar) }
-    ) { p ->
-        Column(modifier = Modifier.padding(p).fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            TextField(value = vm.name, onValueChange = { vm.name = it }, singleLine = true, label = { Text("Name") })
-            TextField(value = vm.bio, onValueChange = { vm.bio = it }, label = { Text("Bio") })
-            Button(
-                onClick = {
-                    scope.launch {
-                        snackbar.showSnackbar("Profile updated", withDismissAction = true)
-                        onBack()
-                    }
-                },
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Save") }
         }
     }
 }
@@ -461,6 +444,44 @@ private fun StatChip(title: String, value: Int) {
         ) {
             Text(value.toString(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             Text(title, color = Color(0xFFA6ABCF), fontSize = 12.sp)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditProfileScreen(vm: ProfileViewModel, onBack: () -> Unit) {
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Edit Profile") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) }
+    ) { p ->
+        Column(
+            modifier = Modifier.padding(p).fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            var name by remember { mutableStateOf(vm.name) }
+            var bio by remember { mutableStateOf(vm.bio) }
+            TextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name") })
+            TextField(value = bio, onValueChange = { bio = it }, label = { Text("Bio") })
+            Button(
+                onClick = {
+                    vm.name = name
+                    vm.bio = bio
+                    scope.launch {
+                        snackbar.showSnackbar("Profile updated", withDismissAction = true)
+                        onBack()
+                    }
+                },
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Save") }
         }
     }
 }
