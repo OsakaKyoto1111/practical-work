@@ -1,26 +1,23 @@
 package com.example.myapplication.ui
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.data.UserEntity
 import com.example.myapplication.data.UserRepository
-import com.example.myapplication.data.local.AppDatabase
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
-class UserViewModel(app: Application) : AndroidViewModel(app) {
-
-    private val repo: UserRepository = UserRepository(
-        AppDatabase.get(app).userDao()
-    )
+@HiltViewModel
+class UserViewModel @Inject constructor(
+    private val repo: UserRepository
+) : ViewModel() {
 
     val users: StateFlow<List<UserEntity>> =
         repo.users
-            .map { it }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun refresh() {
