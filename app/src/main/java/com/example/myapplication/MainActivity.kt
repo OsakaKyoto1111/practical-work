@@ -4,17 +4,45 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -52,8 +80,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -70,9 +96,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -88,13 +117,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.myapplication.ui.UserViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
-
 data class FollowerUi(
-    val id: Long,
+    val id: String,
     val name: String,
     val avatarRes: Int,
     val isFollowed: Boolean = false
@@ -110,13 +140,11 @@ data class PostUi(
     val comments: List<String> = emptyList()
 )
 
-
 class ProfileViewModel : ViewModel() {
     var name by mutableStateOf("Daulet T")
     var bio by mutableStateOf("Android learner · Compose enjoyer")
     fun followingCount(): Int = 0
 }
-
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -125,7 +153,6 @@ class MainActivity : ComponentActivity() {
         setContent { App() }
     }
 }
-
 
 private object Routes {
     const val FEED = "feed"
@@ -173,7 +200,6 @@ fun App() {
                         vm = profileVm,
                         userVM = userVm,
                         onFollowersClick = {
-                            userVm.refresh()
                             navController.navigate(Routes.FOLLOWERS)
                         },
                         onEditClick = {
@@ -233,7 +259,6 @@ fun BottomNavBar(
         }
     }
 }
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -295,20 +320,20 @@ fun FeedScreen() {
             )
         }
     ) { padding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .padding(padding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 8.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
         ) {
-            Spacer(Modifier.height(8.dp))
-            posts.forEach { post ->
+            itemsIndexed(posts, key = { _, post -> post.id }) { index, post ->
                 PostItem(
                     post = post,
+                    index = index,
                     onToggleLike = { toggleLike(post.id) },
                     onAddComment = { comment -> addComment(post.id, comment) }
                 )
-                Spacer(Modifier.height(12.dp))
             }
         }
     }
@@ -317,129 +342,151 @@ fun FeedScreen() {
 @Composable
 fun PostItem(
     post: PostUi,
+    index: Int,
     onToggleLike: () -> Unit,
     onAddComment: (String) -> Unit
 ) {
     var newComment by remember { mutableStateOf("") }
+    var visible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(index * 80L)
+        visible = true
+    }
+
     val likeColor by animateColorAsState(
         targetValue = if (post.isLiked) Color(0xFFFF5252) else Color(0xFFA6ABCF),
         animationSpec = tween(250, easing = FastOutSlowInEasing),
         label = "likeColorPost"
     )
 
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF15193B)),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.elevatedCardElevation(2.dp)
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInHorizontally(
+            initialOffsetX = { it },
+            animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing)
+        ) + fadeIn(animationSpec = tween(450)),
+        exit = fadeOut(animationSpec = tween(200))
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF1E2244)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = post.author.firstOrNull()?.uppercase() ?: "",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Column(modifier = Modifier.padding(start = 10.dp)) {
-                    Text(
-                        post.author,
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        post.time,
-                        color = Color(0xFFA6ABCF),
-                        fontSize = 11.sp
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Text(post.text, color = Color.White, fontSize = 14.sp)
-
-            if (post.comments.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    post.comments.take(3).forEach { comment ->
+        ElevatedCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF15193B)),
+            shape = RoundedCornerShape(16.dp),
+            elevation = CardDefaults.elevatedCardElevation(2.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1E2244)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = "• $comment",
+                            text = post.author.firstOrNull()?.uppercase() ?: "",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Column(modifier = Modifier.padding(start = 10.dp)) {
+                        Text(
+                            post.author,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            post.time,
                             color = Color(0xFFA6ABCF),
-                            fontSize = 12.sp
-                        )
-                    }
-                    if (post.comments.size > 3) {
-                        Text(
-                            text = "+${post.comments.size - 3} more comments",
-                            color = Color(0xFF6C63FF),
-                            fontSize = 12.sp
+                            fontSize = 11.sp
                         )
                     }
                 }
-            }
 
-            Spacer(Modifier.height(8.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                IconButton(onClick = onToggleLike) {
-                    Icon(
-                        Icons.Filled.Favorite,
-                        contentDescription = "Like",
-                        tint = likeColor
-                    )
-                }
-                Text("${post.likes}", color = Color.White, fontSize = 13.sp)
-                Spacer(Modifier.width(8.dp))
-                Icon(
-                    Icons.Filled.ChatBubble,
-                    contentDescription = "Comments",
-                    tint = Color(0xFFA6ABCF)
-                )
-                Text("${post.comments.size}", color = Color.White, fontSize = 13.sp)
-            }
+                Spacer(Modifier.height(8.dp))
+                Text(post.text, color = Color.White, fontSize = 14.sp)
 
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextField(
-                    value = newComment,
-                    onValueChange = { newComment = it },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    placeholder = { Text("Add a comment...", fontSize = 12.sp) }
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        if (newComment.isNotBlank()) {
-                            onAddComment(newComment.trim())
-                            newComment = ""
+                if (post.comments.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Column(
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
+                            4.dp
+                        )
+                    ) {
+                        post.comments.take(3).forEach { comment ->
+                            Text(
+                                text = "• $comment",
+                                color = Color(0xFFA6ABCF),
+                                fontSize = 12.sp
+                            )
                         }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        horizontal = 12.dp,
-                        vertical = 8.dp
+                        if (post.comments.size > 3) {
+                            Text(
+                                text = "+${post.comments.size - 3} more comments",
+                                color = Color(0xFF6C63FF),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
+                        16.dp
                     )
                 ) {
-                    Text("Send", fontSize = 12.sp)
+                    IconButton(onClick = onToggleLike) {
+                        Icon(
+                            Icons.Filled.Favorite,
+                            contentDescription = "Like",
+                            tint = likeColor
+                        )
+                    }
+                    Text("${post.likes}", color = Color.White, fontSize = 13.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        Icons.Filled.ChatBubble,
+                        contentDescription = "Comments",
+                        tint = Color(0xFFA6ABCF)
+                    )
+                    Text("${post.comments.size}", color = Color.White, fontSize = 13.sp)
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextField(
+                        value = newComment,
+                        onValueChange = { newComment = it },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        placeholder = { Text("Add a comment...", fontSize = 12.sp) }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (newComment.isNotBlank()) {
+                                onAddComment(newComment.trim())
+                                newComment = ""
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(
+                            horizontal = 12.dp,
+                            vertical = 8.dp
+                        )
+                    ) {
+                        Text("Send", fontSize = 12.sp)
+                    }
                 }
             }
         }
     }
 }
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -515,6 +562,70 @@ fun ProfileScreen(
         animationSpec = tween(320, easing = FastOutSlowInEasing),
         label = "followColor"
     )
+
+    val followScale = remember { Animatable(1f) }
+
+    LaunchedEffect(isFollowing) {
+        followScale.animateTo(
+            1.12f,
+            animationSpec = spring(
+                dampingRatio = 0.3f,
+                stiffness = Spring.StiffnessMedium
+            )
+        )
+        followScale.animateTo(
+            1f,
+            animationSpec = spring(
+                dampingRatio = 0.7f,
+                stiffness = Spring.StiffnessLow
+            )
+        )
+    }
+
+    var statsVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(800)
+        statsVisible = true
+    }
+    val statsAlpha by animateFloatAsState(
+        targetValue = if (statsVisible) 1f else 0f,
+        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+        label = "statsAlpha"
+    )
+
+    var isSyncing by rememberSaveable { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val avatarScale = remember { Animatable(1f) }
+
+    LaunchedEffect(isSyncing) {
+        if (isSyncing) {
+            while (isActive) {
+                avatarScale.animateTo(
+                    1.08f,
+                    animationSpec = spring(
+                        dampingRatio = 0.4f,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                )
+                avatarScale.animateTo(
+                    0.96f,
+                    animationSpec = spring(
+                        dampingRatio = 0.6f,
+                        stiffness = Spring.StiffnessLow
+                    )
+                )
+            }
+        } else {
+            avatarScale.animateTo(
+                1f,
+                animationSpec = spring(
+                    dampingRatio = 0.7f,
+                    stiffness = Spring.StiffnessLow
+                )
+            )
+        }
+    }
+
     val cardShape = RoundedCornerShape(
         topStart = 28.dp,
         topEnd = 28.dp,
@@ -594,8 +705,9 @@ fun ProfileScreen(
                     Row(
                         modifier = Modifier
                             .padding(top = 16.dp)
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                            .fillMaxWidth()
+                            .alpha(statsAlpha),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly
                     ) {
                         Box(Modifier.clickable { onFollowersClick() }) {
                             StatChip("Followers", followersCount)
@@ -606,7 +718,9 @@ fun ProfileScreen(
                         modifier = Modifier
                             .padding(top = 18.dp)
                             .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
+                            12.dp
+                        )
                     ) {
                         Button(
                             onClick = {
@@ -617,10 +731,15 @@ fun ProfileScreen(
                                     }
                                 } else showUnfollowDialog = true
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .graphicsLayer(
+                                    scaleX = followScale.value,
+                                    scaleY = followScale.value
+                                ),
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = followColor),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            contentPadding = PaddingValues(
                                 vertical = 12.dp
                             )
                         ) {
@@ -642,7 +761,7 @@ fun ProfileScreen(
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = Color.White
                             ),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                            contentPadding = PaddingValues(0.dp)
                         ) {
                             Icon(
                                 Icons.Default.Notifications,
@@ -661,19 +780,60 @@ fun ProfileScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 80.dp)
-                .size(100.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF0F1226))
-                .padding(3.dp)
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.photo_profile),
-                contentDescription = "Profile photo",
+            Box(
                 modifier = Modifier
+                    .graphicsLayer(
+                        scaleX = avatarScale.value,
+                        scaleY = avatarScale.value
+                    )
+                    .size(100.dp)
                     .clip(CircleShape)
-                    .fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
+                    .background(Color(0xFF0F1226))
+                    .padding(3.dp)
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.photo_profile),
+                    contentDescription = "Profile photo",
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+
+            OnlineStatusDot()
+
+            IconButton(
+                onClick = {
+                    if (!isSyncing) {
+                        scope.launch {
+                            isSyncing = true
+                            try {
+                                userVM.refresh()
+                                delay(1000)
+                            } finally {
+                                isSyncing = false
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 0.dp, y = 4.dp)
+                    .size(28.dp)
+                    .background(
+                        Color(0xFF0F1226).copy(alpha = 0.9f),
+                        shape = CircleShape
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Sync",
+                    tint = if (isSyncing) Color(0xFF00E5A8) else Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
         if (showUnfollowDialog) {
             AlertDialog(
@@ -698,6 +858,45 @@ fun ProfileScreen(
 }
 
 @Composable
+fun BoxScope.OnlineStatusDot() {
+    val infinite = rememberInfiniteTransition(label = "onlineDot")
+
+    val scale by infinite.animateFloat(
+        initialValue = 0.8f,
+        targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dotScale"
+    )
+
+    val alpha by infinite.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dotAlpha"
+    )
+
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomStart)
+            .offset(x = (-6).dp, y = 6.dp)
+            .size(16.dp)
+            .graphicsLayer(
+                scaleX = scale,
+                scaleY = scale,
+                alpha = alpha
+            )
+            .background(Color(0xFF00E676), CircleShape)
+            .border(2.dp, Color(0xFF0F1226), CircleShape)
+    )
+}
+
+@Composable
 fun StoriesRow() {
     val stories = listOf("You", "Aruzhan", "Timur", "Dana", "Maks", "Kamila")
     Column(Modifier.padding(horizontal = 16.dp)) {
@@ -708,7 +907,7 @@ fun StoriesRow() {
             fontSize = 14.sp,
             modifier = Modifier.padding(bottom = 8.dp)
         )
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
             items(stories) { name ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(
@@ -741,7 +940,6 @@ fun StoriesRow() {
     }
 }
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FollowersScreen(userVM: UserViewModel, onBack: () -> Unit) {
@@ -749,17 +947,6 @@ fun FollowersScreen(userVM: UserViewModel, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val users by userVM.users.collectAsState()
     var loading by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        if (users.isEmpty() && !loading) {
-            loading = true
-            try {
-                userVM.refresh()
-            } finally {
-                loading = false
-            }
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -773,10 +960,11 @@ fun FollowersScreen(userVM: UserViewModel, onBack: () -> Unit) {
                 actions = {
                     IconButton(
                         onClick = {
-                            loading = true
                             scope.launch {
+                                loading = true
                                 try {
                                     userVM.refresh()
+                                    delay(1000)
                                 } finally {
                                     loading = false
                                 }
@@ -793,27 +981,35 @@ fun FollowersScreen(userVM: UserViewModel, onBack: () -> Unit) {
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            if (users.isEmpty() && !loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Пока пусто. Нажми Refresh.", color = Color(0xFFA6ABCF))
-                }
+            if (loading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(16.dp))
+                ShimmerFollowersPlaceholder()
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(users, key = { it.id }) { u ->
-                        FollowerItem(
-                            follower = FollowerUi(
-                                u.id.toLong(),
-                                u.name,
-                                R.drawable.photo_profile
-                            ),
-                            onToggleFollow = {},
-                            onRemove = {}
+                if (users.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Пока пусто. Нажми Refresh.", color = Color(0xFFA6ABCF))
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
+                            10.dp
                         )
+                    ) {
+                        itemsIndexed(users, key = { _, u -> u.id }) { index, u ->
+                            FollowerItem(
+                                follower = FollowerUi(
+                                    id = u.id.toString(),
+                                    name = u.name,
+                                    avatarRes = R.drawable.photo_profile
+                                ),
+                                index = index,
+                                onToggleFollow = {},
+                                onRemove = {}
+                            )
+                        }
                     }
                 }
             }
@@ -824,6 +1020,7 @@ fun FollowersScreen(userVM: UserViewModel, onBack: () -> Unit) {
 @Composable
 fun FollowerItem(
     follower: FollowerUi,
+    index: Int,
     onToggleFollow: () -> Unit,
     onRemove: () -> Unit
 ) {
@@ -832,6 +1029,127 @@ fun FollowerItem(
         animationSpec = tween(300, easing = FastOutSlowInEasing),
         label = "btn"
     )
+
+    var visible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(index * 70L)
+        visible = true
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInHorizontally(
+            initialOffsetX = { it },
+            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+        ) + fadeIn(animationSpec = tween(400)),
+        exit = fadeOut(animationSpec = tween(200))
+    ) {
+        ElevatedCard(
+            colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF15193B)),
+            shape = RoundedCornerShape(14.dp),
+            elevation = CardDefaults.elevatedCardElevation(2.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(follower.avatarRes),
+                    contentDescription = follower.name,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+                Column(
+                    modifier = Modifier
+                        .padding(start = 12.dp)
+                        .weight(1f)
+                ) {
+                    Text(
+                        follower.name,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        "follows you",
+                        color = Color(0xFFA6ABCF),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                TextButton(onClick = onRemove) {
+                    Text("Remove", color = Color(0xFFFF5252), maxLines = 1)
+                }
+                Spacer(Modifier.width(6.dp))
+                Button(
+                    onClick = onToggleFollow,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = animatedColor),
+                    contentPadding = PaddingValues(
+                        horizontal = 16.dp,
+                        vertical = 8.dp
+                    ),
+                    modifier = Modifier
+                        .widthIn(min = 96.dp)
+                        .heightIn(min = 36.dp)
+                ) {
+                    AnimatedContent(targetState = follower.isFollowed, label = "txt") {
+                        Text(if (it) "Following" else "Follow", color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ShimmerFollowersPlaceholder(count: Int = 6) {
+    val shimmerColors = listOf(
+        Color(0xFF202449),
+        Color(0xFF3A3F6F),
+        Color(0xFF202449)
+    )
+
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val xOffset by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmerOffset"
+    )
+
+    val brush = Brush.linearGradient(
+        colors = shimmerColors,
+        start = Offset(xOffset - 1000f, 0f),
+        end = Offset(xOffset, 0f)
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
+    ) {
+        repeat(count) {
+            ShimmerFollowerRow(brush = brush)
+        }
+    }
+}
+
+@Composable
+fun ShimmerFollowerRow(brush: Brush) {
     ElevatedCard(
         colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF15193B)),
         shape = RoundedCornerShape(14.dp),
@@ -844,59 +1162,45 @@ fun FollowerItem(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Image(
-                painter = painterResource(follower.avatarRes),
-                contentDescription = follower.name,
+            Box(
                 modifier = Modifier
                     .size(44.dp)
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop
+                    .clip(CircleShape)
+                    .background(brush)
             )
+
             Column(
                 modifier = Modifier
                     .padding(start = 12.dp)
-                    .weight(1f)
+                    .weight(1f),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)
             ) {
-                Text(
-                    follower.name,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                Box(
+                    modifier = Modifier
+                        .height(14.dp)
+                        .fillMaxWidth(0.5f)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(brush)
                 )
-                Text(
-                    "follows you",
-                    color = Color(0xFFA6ABCF),
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                Box(
+                    modifier = Modifier
+                        .height(12.dp)
+                        .fillMaxWidth(0.3f)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(brush)
                 )
             }
-            TextButton(onClick = onRemove) {
-                Text("Remove", color = Color(0xFFFF5252), maxLines = 1)
-            }
-            Spacer(Modifier.width(6.dp))
-            Button(
-                onClick = onToggleFollow,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = animatedColor),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = 16.dp,
-                    vertical = 8.dp
-                ),
+
+            Box(
                 modifier = Modifier
-                    .widthIn(min = 96.dp)
-                    .heightIn(min = 36.dp)
-            ) {
-                AnimatedContent(targetState = follower.isFollowed, label = "txt") {
-                    Text(if (it) "Following" else "Follow", color = Color.White)
-                }
-            }
+                    .height(32.dp)
+                    .width(80.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(brush)
+            )
         }
     }
 }
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -921,7 +1225,7 @@ fun EditProfileScreen(vm: ProfileViewModel, onBack: () -> Unit) {
                 .padding(p)
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
         ) {
             var name by remember { mutableStateOf(vm.name) }
             var bio by remember { mutableStateOf(vm.bio) }
@@ -954,7 +1258,6 @@ fun EditProfileScreen(vm: ProfileViewModel, onBack: () -> Unit) {
         }
     }
 }
-
 
 @Composable
 private fun StatChip(title: String, value: Int) {
