@@ -5,6 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 
     id("com.google.dagger.hilt.android") version "2.51.1"
+    alias(libs.plugins.baselineprofile)
 }
 
 android {
@@ -66,9 +67,11 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.0")
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
 
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
@@ -76,6 +79,7 @@ dependencies {
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    "baselineProfile"(project(":baselineprofile"))
     kapt("androidx.room:room-compiler:2.6.1")
 
     implementation("com.google.dagger:hilt-android:2.51.1")

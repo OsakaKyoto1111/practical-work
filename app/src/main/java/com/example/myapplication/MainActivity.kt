@@ -32,12 +32,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
@@ -86,14 +86,18 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -104,6 +108,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -121,8 +126,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import dagger.hilt.android.AndroidEntryPoint
 
+private const val SHOW_RECOMPOSITION_BADGE = true
+
+@Immutable
 data class FollowerUi(
     val id: String,
     val name: String,
@@ -130,6 +140,7 @@ data class FollowerUi(
     val isFollowed: Boolean = false
 )
 
+@Immutable
 data class PostUi(
     val id: Long,
     val author: String,
@@ -553,7 +564,11 @@ fun ProfileScreen(
     onFollowersClick: () -> Unit
 ) {
     val users by userVM.users.collectAsState()
-    val followersCount = users.size
+
+    val followersCount by remember(users) {
+        derivedStateOf { users.size }
+    }
+
     var isFollowing by rememberSaveable { mutableStateOf(false) }
     var showUnfollowDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -595,36 +610,9 @@ fun ProfileScreen(
 
     var isSyncing by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val avatarScale = remember { Animatable(1f) }
 
-    LaunchedEffect(isSyncing) {
-        if (isSyncing) {
-            while (isActive) {
-                avatarScale.animateTo(
-                    1.08f,
-                    animationSpec = spring(
-                        dampingRatio = 0.4f,
-                        stiffness = Spring.StiffnessMedium
-                    )
-                )
-                avatarScale.animateTo(
-                    0.96f,
-                    animationSpec = spring(
-                        dampingRatio = 0.6f,
-                        stiffness = Spring.StiffnessLow
-                    )
-                )
-            }
-        } else {
-            avatarScale.animateTo(
-                1f,
-                animationSpec = spring(
-                    dampingRatio = 0.7f,
-                    stiffness = Spring.StiffnessLow
-                )
-            )
-        }
-    }
+    var recompositionCount by remember { mutableIntStateOf(0) }
+    SideEffect { recompositionCount++ }
 
     val cardShape = RoundedCornerShape(
         topStart = 28.dp,
@@ -679,6 +667,30 @@ fun ProfileScreen(
                         ),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    if (SHOW_RECOMPOSITION_BADGE) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 4.dp),
+                            contentAlignment = Alignment.TopEnd
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF15193B).copy(alpha = 0.85f),
+                                tonalElevation = 2.dp,
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                            ) {
+                                Text(
+                                    text = "Recomp: $recompositionCount",
+                                    color = Color(0xFFA6ABCF),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             vm.name,
@@ -776,65 +788,27 @@ fun ProfileScreen(
             StoriesRow()
             Spacer(Modifier.height(24.dp))
         }
-        Box(
+
+        ProfileAvatar(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 80.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .graphicsLayer(
-                        scaleX = avatarScale.value,
-                        scaleY = avatarScale.value
-                    )
-                    .size(100.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF0F1226))
-                    .padding(3.dp)
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.photo_profile),
-                    contentDescription = "Profile photo",
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
-
-            OnlineStatusDot()
-
-            IconButton(
-                onClick = {
-                    if (!isSyncing) {
-                        scope.launch {
-                            isSyncing = true
-                            try {
-                                userVM.refresh()
-                                delay(1000)
-                            } finally {
-                                isSyncing = false
-                            }
+                .padding(top = 80.dp),
+            isSyncing = isSyncing,
+            onSyncClick = {
+                if (!isSyncing) {
+                    scope.launch {
+                        isSyncing = true
+                        try {
+                            userVM.refresh()
+                            delay(1000)
+                        } finally {
+                            isSyncing = false
                         }
                     }
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 0.dp, y = 4.dp)
-                    .size(28.dp)
-                    .background(
-                        Color(0xFF0F1226).copy(alpha = 0.9f),
-                        shape = CircleShape
-                    )
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Sync",
-                    tint = if (isSyncing) Color(0xFF00E5A8) else Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
+                }
             }
-        }
+        )
+
         if (showUnfollowDialog) {
             AlertDialog(
                 onDismissRequest = { showUnfollowDialog = false },
@@ -852,6 +826,97 @@ fun ProfileScreen(
                         Text("Cancel")
                     }
                 }
+            )
+        }
+    }
+}
+
+@Composable
+fun ProfileAvatar(
+    modifier: Modifier = Modifier,
+    isSyncing: Boolean,
+    onSyncClick: () -> Unit
+) {
+    val avatarScale = remember { Animatable(1f) }
+
+    LaunchedEffect(isSyncing) {
+        if (isSyncing) {
+            while (isActive) {
+                avatarScale.animateTo(
+                    1.08f,
+                    animationSpec = spring(
+                        dampingRatio = 0.4f,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                )
+                avatarScale.animateTo(
+                    0.96f,
+                    animationSpec = spring(
+                        dampingRatio = 0.6f,
+                        stiffness = Spring.StiffnessLow
+                    )
+                )
+            }
+        } else {
+            avatarScale.animateTo(
+                1f,
+                animationSpec = spring(
+                    dampingRatio = 0.7f,
+                    stiffness = Spring.StiffnessLow
+                )
+            )
+        }
+    }
+
+    val context = LocalContext.current
+
+    val imageRequest = remember(context) {
+        ImageRequest.Builder(context)
+            .data(R.drawable.photo_profile)
+            .crossfade(true)
+            .build()
+    }
+
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .graphicsLayer(
+                    scaleX = avatarScale.value,
+                    scaleY = avatarScale.value
+                )
+                .size(100.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF0F1226))
+                .padding(3.dp)
+        ) {
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = "Profile photo",
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+
+        OnlineStatusDot()
+
+        IconButton(
+            onClick = onSyncClick,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = 0.dp, y = 4.dp)
+                .size(28.dp)
+                .background(
+                    Color(0xFF0F1226).copy(alpha = 0.9f),
+                    shape = CircleShape
+                )
+        ) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Sync",
+                tint = if (isSyncing) Color(0xFF00E5A8) else Color.White,
+                modifier = Modifier.size(18.dp)
             )
         }
     }
@@ -907,8 +972,10 @@ fun StoriesRow() {
             fontSize = 14.sp,
             modifier = Modifier.padding(bottom = 8.dp)
         )
-        LazyRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
-            items(stories) { name ->
+        LazyRow(
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
+        ) {
+            items(stories, key = { it }) { name ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(
                         modifier = Modifier
